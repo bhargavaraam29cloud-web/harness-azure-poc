@@ -1,0 +1,52 @@
+# ================================================================
+# FILE: k8s/service.yaml
+# PURPOSE:
+#   Exposes the application pods to the public internet through
+#   an Azure Load Balancer with a public IP address.
+#   Harness applies this file alongside deployment.yaml via the
+#   helm-delegate, which runs "kubectl apply" inside AKS.
+#
+# HOW IT WORKS:
+#   type: LoadBalancer → Azure automatically provisions a public
+#   IP and an L4 (TCP) load balancer that routes inbound traffic
+#   on port 80 to whichever pods match the selector label.
+#
+#   The selector "app: harness-poc-app" matches the label we set
+#   in deployment.yaml, so traffic always goes to healthy pods.
+#
+# NOTE ON PUBLIC IP:
+#   Azure assigns the external IP dynamically. After "kubectl apply"
+#   you find it by running:
+#     kubectl get svc harness-poc-service -n harness-poc
+#   The EXTERNAL-IP column shows the address once Azure is ready.
+# ================================================================
+
+apiVersion: v1        # Core Kubernetes API
+kind: Service         # Resource type — manages network access to pods
+metadata:
+  name: harness-poc-service
+  namespace: harness-poc
+  labels:
+    app: harness-poc-app
+
+spec:
+  # ---------------------------------------------------------------
+  # type: LoadBalancer
+  # Instructs AKS to ask Azure to provision a public Load Balancer.
+  # Azure creates the resource in the same resource group as the
+  # AKS cluster (harness-poc-rg) and assigns a public IP to it.
+  # ---------------------------------------------------------------
+  type: LoadBalancer
+
+  # ---------------------------------------------------------------
+  # selector: Routes traffic only to pods with this label.
+  # Matches "app: harness-poc-app" set in deployment.yaml.
+  # ---------------------------------------------------------------
+  selector:
+    app: harness-poc-app
+
+  ports:
+    - name:       http
+      protocol:   TCP
+      port:       80          # External port users connect to
+      targetPort: 80          # Pod port (matches containerPort in deployment)

@@ -1,0 +1,117 @@
+# ================================================================
+# FILE: k8s/deployment.yaml
+# PURPOSE:
+#   Tells Kubernetes HOW to run our application inside AKS.
+#   Harness fetches this file from GitHub (via github_connector)
+#   and the helm-delegate pod runs "kubectl apply" to create
+#   or update the app pods in the harness-poc namespace.
+#
+# KEY DECISIONS EXPLAINED:
+#   replicas: 1      → 1 pod is enough for the POC. Easy to scale.
+#   image: nginx:alpine → we use nginx for the canary/initial deploy;
+#                          the Harness pipeline will override this
+#                          with the ACR image tag on each run.
+#   resources limits → prevent one pod from starving others.
+#   readinessProbe   → Kubernetes waits until / returns HTTP 200
+#                      before sending any traffic to the new pod.
+#                      This is what enables zero-downtime rolling updates.
+# ================================================================
+
+apiVersion: apps/v1       # Kubernetes API group that handles workloads
+kind: Deployment          # Resource type — manages a set of identical pods
+metadata:
+  # Name shown in "kubectl get deployments -n harness-poc"
+  name: harness-poc-app
+  # Deploy only inside the harness-poc namespace (not the default one)
+  namespace: harness-poc
+  labels:
+    app: harness-poc-app  # Label used by the Service selector below
+
+spec:
+  # ---------------------------------------------------------------
+  # replicas: How many identical pod copies to run at all times.
+  # Kubernetes auto-restarts crashed pods to maintain this count.
+  # ---------------------------------------------------------------
+  replicas: 1
+
+  # ---------------------------------------------------------------
+  # selector: How this Deployment finds its own pods.
+  # Must match the labels in spec.template.metadata.labels below.
+  # ---------------------------------------------------------------
+  selector:
+    matchLabels:
+      app: harness-poc-app
+
+  # ---------------------------------------------------------------
+  # strategy: How pods are replaced during an update.
+  # RollingUpdate = replace one pod at a time → zero downtime.
+  #   maxUnavailable: 0  → never drop below 1 running pod
+  #   maxSurge: 1        → allow 1 extra pod during the transition
+  # ---------------------------------------------------------------
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        app: harness-poc-app   # Must match selector.matchLabels above
+    spec:
+      containers:
+        - name: harness-poc-app
+
+          # --------------------------------------------------------
+          # image: The Docker image to run inside this pod.
+          # On the first manual apply we use nginx:alpine as a
+          # placeholder. Harness replaces this automatically with
+          # the ACR-hosted image (harnesspoc7058.azurecr.io/harness-poc:<tag>)
+          # on every pipeline execution.
+          # --------------------------------------------------------
+          image: nginx:alpine
+
+          ports:
+            - containerPort: 80   # Must match the EXPOSE in Dockerfile
+
+          # --------------------------------------------------------
+          # resources: CPU and RAM limits.
+          # requests = guaranteed minimum (used for pod scheduling).
+          # limits   = hard ceiling (pod is killed if it exceeds this).
+          # These small values are fine for a single-node POC cluster.
+          # --------------------------------------------------------
+          resources:
+            requests:
+              cpu:    "5m"      # 5 millicores = 0.5% of one CPU core
+              memory: "16Mi"    # 16 megabytes RAM
+            limits:
+              cpu:    "100m"    # Hard max: 10% of one CPU core
+              memory: "64Mi"    # Hard max: 64 MB RAM
+
+          # --------------------------------------------------------
+          # readinessProbe: Kubernetes hits GET / every 5 seconds.
+          # Until this returns HTTP 200, the pod is NOT added to
+          # the Load Balancer pool — so broken pods never get traffic.
+          # Harness Delegate waits for all pods to become Ready
+          # before marking the deployment step as successful.
+          # --------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5    # Wait 5s after container start
+            periodSeconds:       5    # Check every 5 seconds
+            failureThreshold:    3    # Mark unready after 3 failures
+
+          # --------------------------------------------------------
+          # livenessProbe: If the pod is Running but the app is
+          # frozen/deadlocked, this probe detects it and triggers
+          # a container restart automatically.
+          # --------------------------------------------------------
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds:       20
+            failureThreshold:    3

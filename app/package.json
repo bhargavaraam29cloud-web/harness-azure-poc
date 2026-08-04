@@ -1,0 +1,12 @@
+{
+  "name": "harness-poc-server",
+  "version": "1.0.0",
+  "description": "Harness.io + Azure AKS POC — Node.js app deployed via Harness CD pipeline",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

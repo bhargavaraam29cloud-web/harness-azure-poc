@@ -1,0 +1,4 @@
+node_modules/
+.harness_azure_creds.env
+*.log
+.DS_Store

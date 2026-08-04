@@ -1,0 +1,122 @@
+# ================================================================
+# FILE: .harness/pipeline.yaml
+# PURPOSE:
+#   The complete Harness Pipeline-as-Code definition.
+#   Paste this into the Harness Pipeline Studio YAML editor
+#   to create the automated deployment workflow.
+#
+# WHAT THIS PIPELINE DOES (end-to-end):
+#   1. Harness detects a push to GitHub (via github_connector)
+#   2. Fetches k8s/deployment.yaml and k8s/service.yaml
+#   3. Sends a deployment task to helm-delegate inside AKS
+#   4. Delegate runs "kubectl apply" → pods update (rolling deploy)
+#   5. Harness waits for pods to reach Ready state
+#   6. If any pod fails → K8sRollingRollback runs automatically
+#
+# HOW TO USE:
+#   1. In Harness UI → Pipelines → + Create a Pipeline
+#   2. Name: Harness Azure POC Deployment → Start
+#   3. Click YAML toggle (top right of pipeline editor)
+#   4. Delete all default content
+#   5. Paste this entire file
+#   6. Click Save → then Run
+# ================================================================
+
+pipeline:
+  name: Harness Azure POC Deployment
+  # identifier: unique ID used by Harness API and expressions.
+  # No spaces allowed — use underscores.
+  identifier: harness_azure_poc_pipeline
+
+  # projectIdentifier: the project this pipeline lives in.
+  # "default_project" is the default project in free-tier accounts.
+  projectIdentifier: default_project
+
+  # orgIdentifier: the Harness organisation this belongs to.
+  # "default" is the default org for free-tier accounts.
+  orgIdentifier: default
+
+  stages:
+    - stage:
+        # -------------------------------------------------------
+        # Stage name and identifier shown in the Harness UI graph.
+        # -------------------------------------------------------
+        name: Deploy to AKS
+        identifier: Deploy_AKS
+
+        # type: Deployment → Harness treats this as a CD stage.
+        # It expects a Service, Environment, and Infrastructure.
+        type: Deployment
+
+        spec:
+          # -----------------------------------------------------
+          # deploymentType: Kubernetes
+          # Tells Harness which deployment steps are available
+          # (K8sRollingDeploy, K8sCanaryDeploy, K8sBGSwapServices…)
+          # -----------------------------------------------------
+          deploymentType: Kubernetes
+
+          # -----------------------------------------------------
+          # service: WHAT to deploy.
+          # References the Service entity created in Harness UI.
+          # That entity points Harness to the GitHub repo files.
+          # -----------------------------------------------------
+          service:
+            serviceRef: harness_poc_service
+
+          # -----------------------------------------------------
+          # environment: WHERE to deploy.
+          # References the Environment + Infrastructure created
+          # in Harness UI (Production / aks_infra → AKS cluster).
+          # -----------------------------------------------------
+          environment:
+            environmentRef: Production
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: aks_infra
+
+          # -----------------------------------------------------
+          # execution: The actual steps to run.
+          # -----------------------------------------------------
+          execution:
+            steps:
+              - step:
+                  # -------------------------------------------
+                  # K8sRollingDeploy: replaces pods one at a time.
+                  # Zero-downtime: new pod must pass readiness
+                  # probe before the old pod is terminated.
+                  # Harness tracks the rollout and waits until
+                  # all pods show STATUS: Running / READY: 1/1.
+                  # -------------------------------------------
+                  type: K8sRollingDeploy
+                  name: Rolling Deploy to AKS
+                  identifier: Rolling_Deploy
+                  timeout: 10m              # Fail if not done in 10 minutes
+                  spec:
+                    skipDryRun: false       # Run a dry-run check first
+
+            # ---------------------------------------------------
+            # rollbackSteps: Run ONLY if the deploy step fails.
+            # K8sRollingRollback reverts every pod back to the
+            # last known-good image within seconds.
+            # No manual intervention needed — Harness handles it.
+            # ---------------------------------------------------
+            rollbackSteps:
+              - step:
+                  name: Rollback Rollout
+                  identifier: Rollback_Rollout
+                  type: K8sRollingRollback
+                  timeout: 10m
+                  spec: {}
+
+        # -------------------------------------------------------
+        # failureStrategies: What to do when any error occurs.
+        # AllErrors catches crashes, timeouts, image pull errors.
+        # StageRollback triggers the rollbackSteps above.
+        # -------------------------------------------------------
+        failureStrategies:
+          - onFailure:
+              errors:
+                - AllErrors
+              action:
+                type: StageRollback
